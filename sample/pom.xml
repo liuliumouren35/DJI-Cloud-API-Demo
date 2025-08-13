@@ -5,12 +5,12 @@
     <parent>
         <artifactId>cloud-api-sample</artifactId>
         <groupId>com.dji</groupId>
-        <version>${revision}</version>
+        <version>1.10.0</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>sample</artifactId>
-    <version>${revision}</version>
+    <version>1.10.0</version>
 
     <properties>
         <mysql.version>8.0.31</mysql.version>
@@ -30,7 +30,7 @@
         <dependency>
             <groupId>com.dji</groupId>
             <artifactId>cloud-sdk</artifactId>
-            <version>${cloud-sdk.revision}</version>
+            <version>1.0.3</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

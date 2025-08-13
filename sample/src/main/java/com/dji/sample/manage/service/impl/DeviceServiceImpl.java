@@ -22,6 +22,7 @@ import com.dji.sdk.cloudapi.firmware.*;
 import com.dji.sdk.cloudapi.firmware.api.AbstractFirmwareService;
 import com.dji.sdk.cloudapi.property.api.AbstractPropertyService;
 import com.dji.sdk.cloudapi.tsa.DeviceIconUrl;
+import com.dji.sdk.cloudapi.tsa.IconUrlEnum;
 import com.dji.sdk.cloudapi.tsa.TopologyDeviceModel;
 import com.dji.sdk.common.*;
 import com.dji.sdk.config.version.GatewayManager;
@@ -433,17 +434,83 @@ public class DeviceServiceImpl implements IDeviceService {
 
     @Override
     public Boolean bindDevice(DeviceDTO device) {
+        // 先检查设备是否已存在
+        Optional<DeviceDTO> existingDeviceOpt = this.getDeviceBySn(device.getDeviceSn());
+        
+        if (existingDeviceOpt.isEmpty()) {
+            // 设备不存在，先创建设备记录
+            log.info("Device {} not found, creating new device record", device.getDeviceSn());
+            
+            // 设置设备基本信息
+            device.setBoundStatus(false);
+            device.setLoginTime(LocalDateTime.now());
+            
+            // 如果没有设备名称，尝试从字典获取
+            if (!StringUtils.hasText(device.getDeviceName())) {
+                try {
+                    Optional<DeviceDictionaryDTO> dictionaryOpt = dictionaryService.getOneDictionaryInfoByTypeSubType(
+                            device.getDomain().getDomain(), 
+                            device.getType().getType(), 
+                            device.getSubType().getSubType());
+                    
+                    if (dictionaryOpt.isPresent()) {
+                        DeviceDictionaryDTO dict = dictionaryOpt.get();
+                        device.setDeviceName(dict.getDeviceName());
+                        device.setDeviceDesc(dict.getDeviceDesc());
+                        if (!StringUtils.hasText(device.getNickname())) {
+                            device.setNickname(dict.getDeviceName());
+                        }
+                    } else {
+                        // 如果字典中没有，使用默认值
+                        device.setDeviceName("Unknown Device");
+                        device.setDeviceDesc("Device type not found in dictionary");
+                        if (!StringUtils.hasText(device.getNickname())) {
+                            device.setNickname("Unknown Device");
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to get device dictionary info for device {}, using defaults", device.getDeviceSn(), e);
+                    device.setDeviceName("Unknown Device");
+                    device.setDeviceDesc("Device type not found in dictionary");
+                    if (!StringUtils.hasText(device.getNickname())) {
+                        device.setNickname("Unknown Device");
+                    }
+                }
+            }
+            
+            // 设置默认图标
+            if (device.getIconUrl() == null) {
+                device.setIconUrl(new DeviceIconUrl()
+                        .setNormalIconUrl(IconUrlEnum.NORMAL_EQUIPMENT.getUrl())
+                        .setSelectIconUrl(IconUrlEnum.SELECT_EQUIPMENT.getUrl()));
+            }
+            
+            // 保存设备记录
+            Integer deviceId = this.saveDevice(device);
+            if (deviceId <= 0) {
+                log.error("Failed to create device record for device {}", device.getDeviceSn());
+                return false;
+            }
+            
+            log.info("Successfully created device record for device {} with ID {}", device.getDeviceSn(), deviceId);
+        }
+        
+        // 现在执行绑定逻辑
         device.setBoundStatus(true);
         device.setBoundTime(LocalDateTime.now());
 
         boolean isUpd = this.updateDevice(device);
         if (!isUpd) {
+            log.error("Failed to update device binding status for device {}", device.getDeviceSn());
             return false;
         }
 
+        // 检查设备是否在线（从Redis获取）
         Optional<DeviceDTO> deviceOpt = deviceRedisService.getDeviceOnline(device.getDeviceSn());
         if (deviceOpt.isEmpty()) {
-            return false;
+            log.warn("Device {} is not online, binding completed but device status is offline", device.getDeviceSn());
+            // 设备不在线也可以绑定成功，只是状态显示为离线
+            return true;
         }
 
         DeviceDTO redisDevice = deviceOpt.get();
@@ -461,6 +528,8 @@ public class DeviceServiceImpl implements IDeviceService {
 
         pushDeviceOnlineTopo(device.getWorkspaceId(), gatewaySn, deviceSn);
         subDeviceOnlineSubscribeTopic(SDKManager.getDeviceSDK(gatewaySn));
+        
+        log.info("Successfully bound device {} to workspace {}", device.getDeviceSn(), device.getWorkspaceId());
         return true;
     }
 
